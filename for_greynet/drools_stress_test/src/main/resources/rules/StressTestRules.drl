@@ -1,0 +1,72 @@
+// --- File: src/main/resources/rules/StressTestRules.drl ---
+// The package now matches the directory structure 'rules/'
+package rules;
+
+import org.example.model.Customer;
+import org.example.model.Transaction;
+import org.example.model.SecurityAlert;
+import org.example.model.ScoreHolder;
+
+// Declare a global variable that will be available to all rules.
+// This must be set on the KieSession from the Java code.
+global ScoreHolder scoreHolder;
+
+// Rule 1: Simple filter for high-value transactions.
+rule "High Value Transaction"
+    when
+        $tx: Transaction(amount > 45000.0)
+    then
+        scoreHolder.addPenalty($tx.getAmount() / 1000.0);
+        scoreHolder.incrementRulesFired();
+end
+
+// Rule 2: Group transactions by customer and check for excessive activity.
+// This rule finds a customer, then uses 'accumulate' to count their transactions.
+rule "Excessive Transactions per Customer"
+    when
+        $customer: Customer()
+        // accumulate is Drools' powerful way to perform calculations over collections of facts.
+        $count: Number(intValue > 25) from accumulate(
+            Transaction(customerId == $customer.getId()),
+            count(1)
+        )
+    then
+        scoreHolder.addPenalty(($count.intValue() - 25) * 10.0);
+        scoreHolder.incrementRulesFired();
+end
+
+// Rule 3: Join transactions with security alerts on location.
+// This is a simple, natural join in Drools.
+rule "Transaction in Alerted Location"
+    when
+        $tx: Transaction($loc: location)
+        $alert: SecurityAlert(location == $loc)
+    then
+        scoreHolder.addPenalty(100.0 * $alert.getSeverity());
+        scoreHolder.incrementRulesFired();
+end
+
+// Rule 4: Join to find transactions from inactive customers.
+rule "Inactive Customer Transaction"
+    when
+        $customer: Customer(status == "inactive")
+        // The 'exists' keyword checks for the presence of a matching fact without binding it.
+        exists Transaction(customerId == $customer.getId())
+    then
+        scoreHolder.addPenalty(500.0);
+        scoreHolder.incrementRulesFired();
+end
+
+// Rule 5: Complex rule using 'not'.
+// Penalize if a high-risk customer has a transaction in a location
+// that does NOT have a security alert.
+rule "High Risk Transaction without Alert"
+    when
+        $customer: Customer(riskLevel == "high")
+        $tx: Transaction(customerId == $customer.getId(), $loc: location)
+        // 'not' checks for the non-existence of a fact matching the criteria.
+        not (SecurityAlert(location == $loc))
+    then
+        scoreHolder.addPenalty(1000.0);
+        scoreHolder.incrementRulesFired();
+end
